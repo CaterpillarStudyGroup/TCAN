@@ -169,8 +169,16 @@ def get_pipeline(args):
     validation_pipeline.to(device)
     return validation_pipeline, appearance_encoder
 
+"""
+Input
+src_img_p: 被驱动角色图像的路径
+src_json_p:
+driving_video_p: 驱动动作视频的路径
+"""
 def data_prepare(config, src_img_p, src_posedict_p, dri_video_p):
+    # 读入被驱动图像
     src_img = cv2.imread(src_img_p)
+    # 读入驱动视频
     cap = cv2.VideoCapture(dri_video_p)
     to_posedict_dir = os.path.splitext(dri_video_p)[0]
     os.makedirs(to_posedict_dir, exist_ok=True)
@@ -180,7 +188,8 @@ def data_prepare(config, src_img_p, src_posedict_p, dri_video_p):
     while True:
         ret, f = cap.read()
         if not ret: break
-        dri_img_lst.append(f)        
+        dri_img_lst.append(f)    
+        # 逐帧提取pose    
         pose, posedict = get_openpose(f)
         posedict_p = opj(to_posedict_dir, f"{idx:06d}.pkl")
         with open(posedict_p, "wb") as f:
@@ -235,19 +244,31 @@ def data_prepare(config, src_img_p, src_posedict_p, dri_video_p):
     #### delete <<<<
     return crop_src_img, retarget_dri_video
 
-
+"""
+Input
+src_img_p: 被驱动角色图像的路径
+src_json_p:
+driving_video_p: 驱动动作视频的路径
+"""
 def generate(args, src_img_p, src_json_p, driving_video_p):
+    # 读入配置文件
     config = OmegaConf.load(args.config)
+    # 用户输入转换为模型输入：被驱动图像，控制信号
     source_image, control = data_prepare(config, src_img_p, src_json_p, driving_video_p)
+    # 构造推断pipeline
     pipeline, appearance_encoder = get_pipeline(args)
 
     H, W, C = source_image.shape
+    # 控制信号的长度是什么？帧数？
     original_length = control.shape[0]
+    # 将控制信号的长度补齐为config.L的倍数
     if control.shape[0] % config.L > 0:
         control = np.pad(control, ((0, config.L-control.shape[0] % config.L), (0, 0), (0, 0), (0, 0)), mode='edge')
+    # 初始化随机种子
     generator = torch.Generator(device=torch.device("cuda:0"))
     generator.manual_seed(torch.initial_seed())
 
+    # 开始推断
     with torch.autocast("cuda"):
         sample = pipeline(
             prompt                  = "",
@@ -267,17 +288,21 @@ def generate(args, src_img_p, src_json_p, driving_video_p):
             use_temporal_controlnet = args.use_temporal_controlnet
         ).videos
 
+    # 取前original_length帧，因为后面都是padding
     sample = sample[:, :, :original_length]
     return sample
     
-    
+# 推断代码入口函数
 if __name__ == "__main__":
+    # 读入控制参数
     args = parse_args()
+    # 运行一次视频生成
     sample = generate(
         args=args,
-        src_img_p=args.src_img,
-        src_json_p=args.src_posedict,
-        driving_video_p=args.driving_video,
+        src_img_p=args.src_img, # 被驱动的图像
+        src_json_p=args.src_posedict, # 驱动pose的骨骼定义
+        driving_video_p=args.driving_video, # 源动作视频
     )
+    # 生成结果写成视频文件
     save_videos_grid(sample, args.save_p)
 
