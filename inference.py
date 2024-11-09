@@ -189,8 +189,9 @@ def data_prepare(config, src_img_p, src_posedict_p, dri_video_p):
         ret, f = cap.read()
         if not ret: break
         dri_img_lst.append(f)    
-        # 逐帧提取pose    
+        # 调用dwpose逐帧提取pose    
         pose, posedict = get_openpose(f)
+        # 把pose作为中间结果存下来
         posedict_p = opj(to_posedict_dir, f"{idx:06d}.pkl")
         with open(posedict_p, "wb") as f:
             pickle.dump(posedict, f)
@@ -199,12 +200,16 @@ def data_prepare(config, src_img_p, src_posedict_p, dri_video_p):
     dri_posedict_ps = sorted(glob(opj(to_posedict_dir, "*")))
     
     dri_pose_lst = []
+    # dri_img：驱动视频
+    # dri_posedict_p：驱动pose
     for dri_img, dri_posedict_p in tqdm(
         zip(dri_img_lst, dri_posedict_ps), 
         total=len(dri_img_lst), 
         ncols=75, 
         desc=f"retarget {len(dri_img_lst)} poses"
     ):
+        # 逐帧的2D重定向
+        # 为什么要crop原始图像？
         crop_src_img, crop_src_pose, crop_dri_pose = get_retargeted(
             src_img=src_img,
             src_pkl_p=src_posedict_p,
